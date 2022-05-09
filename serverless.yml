@@ -1,0 +1,161 @@
+service: authority
+package:
+  exclude:
+    - .vscode
+    - REAME.md
+    - .eslintrc
+    - jest.config.json
+
+custom:
+  stage: ${opt:stage, 'staging'}
+  region: 'sa-east-1'
+  staging:
+    stage: staging
+    authUserTableName: auth-user-staging
+    authClientTableName: auth-client-staging
+    authCodeTableName: auth-code-staging
+    expireDays: 1
+    expireDaysRefresh: 7
+    authoritySecretId: authority-staging
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  stage: ${self:custom.stage}
+  region: sa-east-1
+  accountId: '174628554481'
+  deploymentBucket:
+    name: serverless.tag.deployment
+  apiGateway:
+    restApiId: s9jeciatp9
+    restApiRootResourceId: gl8dfgoxck
+
+  environment:
+    STAGE: ${self:custom.stage}
+    REGION: ${self:custom.region}
+    AUTHORITY_SECRET_ID: ${self:custom.${self:custom.stage}.authoritySecretId}
+    TABLE_CLIENT: ${self:custom.${self:custom.stage}.authClientTableName}
+    TABLE_CODE: ${self:custom.${self:custom.stage}.authCodeTableName}
+    TABLE_USER: ${self:custom.${self:custom.stage}.authUserTableName}
+    EXPIRE_DAYS: ${self:custom.${self:custom.stage}.expireDays}
+    EXPIRE_DAYS_REFRESH: ${self:custom.${self:custom.stage}.expireDaysRefresh}
+    ACCOUNT_ID: ${self:provider.accountId}
+
+functions:
+  autorize:
+    handler: src/functions/auth/autorize.handler
+    events:
+      - http:
+          method: get
+          path: auth
+  approves:
+    handler: src/functions/auth/approves.handler
+    events:
+      - http:
+          method: put
+          path: auth
+          authorizer: 
+            name: httpValidate
+            type: token
+  authenticate:
+    handler: src/functions/auth/authenticate.handler
+    events:
+      - http:
+          method: post
+          path: auth
+  userCreate:
+    handler: src/functions/user/create.handler
+    events:
+      - http:
+          method: post
+          path: auth/user
+  userUpdate:
+    handler: src/functions/user/update.handler
+    events:
+      - http:
+          method: put
+          path: auth/user/{username}
+  userChange:
+    handler: src/functions/user/change.handler
+    events:
+      - http:
+          method: put
+          path: auth/user/password
+  clientCreate:
+    handler: src/functions/client/create.handler
+    events:
+      - http:
+          method: post
+          path: auth/client
+  clientUpdate:
+    handler: src/functions/client/update.handler
+    events:
+      - http:
+          method: put
+          path: auth/client/{client_id}
+  httpValidate:
+    handler: src/functions/auth/httpValidate.handler
+  graphqlValidate:
+    handler: src/functions/auth/graphqlValidate.handler
+
+resources:
+  Resources:
+    AuthUserTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.${self:custom.stage}.authUserTableName}
+        AttributeDefinitions:
+          - AttributeName: username
+            AttributeType: S
+        KeySchema:
+          - AttributeName: username
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+    AuthClientTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.${self:custom.stage}.authClientTableName}
+        AttributeDefinitions:
+          - AttributeName: client_id
+            AttributeType: S
+          - AttributeName: client_secret
+            AttributeType: S
+        KeySchema:
+          - AttributeName: client_id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: secret-index
+            KeySchema:
+              - AttributeName: client_id
+                KeyType: HASH
+              - AttributeName: client_secret
+                KeyType: RANGE
+            Projection: 
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+    AuthCodeTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.${self:custom.stage}.authCodeTableName}
+        AttributeDefinitions:
+          - AttributeName: code
+            AttributeType: S
+          - AttributeName: client_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: code
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: code-client-index
+            KeySchema:
+              - AttributeName: code
+                KeyType: HASH
+              - AttributeName: client_id
+                KeyType: RANGE
+            Projection: 
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+plugins:
+  - serverless-offline
+  - serverless-plugin-typescript
+  - serverless-iam-roles-per-function
